@@ -294,22 +294,11 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 ## 👨‍💻 Autor
 
 **Seu Nome**
-- GitHub: [@seu-usuario](https://github.com/seu-usuario)
-- LinkedIn: [Seu Nome](https://linkedin.com/in/seu-perfil)
-- Email: seu.email@exemplo.com
+- GitHub: [@EmanuelF31](https://github.com/EmanuelF31)
+- LinkedIn: [Emanuel Ítalo Ferreira Menezes](https://www.linkedin.com/in/emanuelifm31/)
+- Email: ferreira.emanuelf31@gmail.com
 
 ---
-
-## 🙏 Agradecimentos
-
-- Equipe React por esta incrível biblioteca
-- Comunidade Capacitor pelo framework híbrido
-- Todos os contribuidores e testadores
-
----
-
-<div align="center">
-  Feito com ❤️ e ☕
-  
-  **SRM Visitas** © 2024
+ 
+  **SRM Visitas** © 2025
 </div>
