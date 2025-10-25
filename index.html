@@ -3,13 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#111827" />
     <title>SRM Visitas</title>
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body>
     <div id="root"></div>
+    
+    <!-- Capacitor Storage deve ser carregado ANTES do app -->
     <script src="/capacitor-storage.js"></script>
+    
+    <!-- App principal -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
