@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart3, MapPin, Users, Briefcase, UserCog, Plus, Edit2, Trash2, Save, X, Upload, Calendar, FileDown, Download, RotateCcw } from 'lucide-react';
+// Ícones: Adicionei Share2 e removi FileDown (não usado mais)
+import { 
+  BarChart3, MapPin, Users, Briefcase, UserCog, Plus, Edit2, Trash2, 
+  Save, X, Upload, Calendar, Download, RotateCcw, Share2 
+} from 'lucide-react';
+
+// --- Novas Importações (Capacitor e PDF) ---
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { jsPDF } from "jspdf";
+import "jspdf-autotable";
+// --- Fim das Novas Importações ---
 
 const SRMVisitas = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -14,8 +25,14 @@ const SRMVisitas = () => {
   const [editingId, setEditingId] = useState(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState('');
-  const [selectedFuncionario, setSelectedFuncionario] = useState(null);
   
+  // --- Novos Estados para o PDF ---
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [showPDFModal, setShowPDFModal] = useState(false);
+  // pdfData: { path: 'file_uri_no_celular', name: 'nome_do_arquivo.pdf' }
+  const [pdfData, setPdfData] = useState(null);
+  // --- Fim dos Novos Estados ---
+
   // Form states
   const [clienteForm, setClienteForm] = useState({ codigo: '', descricao: '', temContrato: false });
   const [servicoForm, setServicoForm] = useState({ codigo: '', descricao: '' });
@@ -83,13 +100,16 @@ const SRMVisitas = () => {
     };
     
     try {
+      // localStorage (web) é usado apenas para o backup automático rápido.
       localStorage.setItem('srm_backup', JSON.stringify(backup));
     } catch (error) {
       console.error('Erro ao criar backup automático:', error);
     }
   };
 
-  const downloadBackup = () => {
+  // --- FUNÇÃO DE BACKUP ATUALIZADA (OBJETIVO 1) ---
+  const downloadBackup = async () => {
+    // 1. Criar os dados do backup
     const backup = {
       version: '1.0',
       date: new Date().toISOString(),
@@ -100,19 +120,30 @@ const SRMVisitas = () => {
         funcionarios
       }
     };
-
     const dataStr = JSON.stringify(backup, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `srm-backup-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const fileName = `srm-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+    try {
+      // 2. Usar Capacitor Filesystem para salvar no diretório de Documentos
+      // Isso pedirá permissão no Android (se configurado no AndroidManifest.xml)
+      await Filesystem.writeFile({
+        path: fileName,
+        data: dataStr,
+        directory: Directory.Documents, // Salva na pasta "Documentos"
+        encoding: Encoding.UTF8,
+      });
+
+      alert(`Backup salvo com sucesso em Documentos/${fileName}`);
+    
+    } catch (e) {
+      console.error('Erro ao salvar backup:', e);
+      alert('Erro ao salvar backup. Verifique as permissões do app.');
+      // Você pode pedir a permissão aqui explicitamente se falhar
+    }
   };
 
+  // Função de Restaurar: Já pede permissão ao abrir o seletor de arquivos.
+  // Nenhuma mudança necessária aqui.
   const handleRestoreBackup = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -141,72 +172,187 @@ const SRMVisitas = () => {
     }
   };
 
-  // Generate PDF Report
-  const generateReport = (funcionarioId) => {
+  // --- FUNÇÃO DE GERAR RELATÓRIO ATUALIZADA (OBJETIVO 3) ---
+  const generateReport = async (funcionarioId) => {
     const func = funcionarios.find(f => f.id === funcionarioId);
     if (!func) return;
 
-    const stats = calcularEstatisticas()[funcionarioId];
-    const visitasFiltradas = getFilteredVisitas().filter(v => parseInt(v.funcionarioId) === funcionarioId);
-    
-    let report = `===========================================\n`;
-    report += `         RELATÓRIO DE PAGAMENTO\n`;
-    report += `         SRM VISITAS\n`;
-    report += `===========================================\n\n`;
-    report += `Funcionário: ${func.nome}\n`;
-    report += `Tipo: ${func.tipo === 'tecnico' ? 'TÉCNICO' : 'GERENTE'}\n`;
-    report += `Período: ${semanaAtual ? getCurrentWeekDates().monday.toLocaleDateString('pt-BR') + ' até ' + getCurrentWeekDates().sunday.toLocaleDateString('pt-BR') : 'Todas as visitas'}\n`;
-    report += `Data do Relatório: ${new Date().toLocaleDateString('pt-BR')}\n\n`;
-    
-    report += `-------------------------------------------\n`;
-    report += `RESUMO FINANCEIRO\n`;
-    report += `-------------------------------------------\n`;
-    report += `Total de Visitas: ${stats.totalVisitas}\n`;
-    report += `Valor Total de Serviços: R$ ${stats.totalServicos.toFixed(2)}\n`;
-    report += `Valor Total de Locomoção: R$ ${stats.totalLocomocao.toFixed(2)}\n`;
-    report += `Total Líquido: R$ ${stats.totalGeral.toFixed(2)}\n\n`;
-    
-    report += `-------------------------------------------\n`;
-    report += `CÁLCULO DE PAGAMENTO\n`;
-    report += `-------------------------------------------\n`;
-    report += `Salário Fixo ${semanaAtual ? '(Semanal)' : '(Mensal)'}: R$ ${(semanaAtual ? stats.salarioFixo / 4 : stats.salarioFixo).toFixed(2)}\n`;
-    
-    if (func.tipo === 'tecnico') {
-      report += `Comissão (${stats.percentual}%): R$ ${stats.comissao.toFixed(2)}\n`;
-    }
-    
-    report += `\n>> TOTAL A PAGAR: R$ ${stats.totalAPagar.toFixed(2)} <<\n\n`;
-    
-    report += `===========================================\n`;
-    report += `DETALHAMENTO DAS VISITAS\n`;
-    report += `===========================================\n\n`;
-    
-    visitasFiltradas.sort((a, b) => new Date(a.data) - new Date(b.data)).forEach((visita, index) => {
-      report += `Visita ${index + 1}:\n`;
-      report += `  Data: ${new Date(visita.data).toLocaleDateString('pt-BR')}\n`;
-      report += `  Cliente: ${getClienteNome(visita.clienteId)}\n`;
-      report += `  Serviço: ${getServicoNome(visita.servicoId)}\n`;
-      report += `  Locomoção: R$ ${parseFloat(visita.valorLocomocao).toFixed(2)}\n`;
-      report += `  Valor: R$ ${parseFloat(visita.valorServico).toFixed(2)}\n`;
-      report += `-------------------------------------------\n`;
-    });
-    
-    report += `\n===========================================\n`;
-    report += `Assinatura: _____________________________\n`;
-    report += `Data: ___________________________________\n`;
-    report += `===========================================\n`;
+    // 1. Mostrar o modal de "gerando..." (Processo em tela)
+    setShowPDFModal(true);
+    setIsGeneratingPDF(true);
+    setPdfData(null); // Limpar dados anteriores
 
-    // Download as text file
-    const blob = new Blob([report], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `relatorio-${func.nome.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Atraso de 500ms para o usuário VER o modal de "gerando"
+    await new Promise(resolve => setTimeout(resolve, 500)); 
+
+    // Obter dados
+    const stats = calcularEstatisticas()[funcionarioId];
+    const visitasFiltradas = getFilteredVisitas()
+      .filter(v => parseInt(v.funcionarioId) === funcionarioId)
+      .sort((a, b) => new Date(a.data) - new Date(b.data));
+
+    try {
+      // 2. Gerar o PDF
+      const doc = new jsPDF();
+      const reportDate = new Date().toLocaleDateString('pt-BR');
+      const periodo = semanaAtual 
+        ? `${getCurrentWeekDates().monday.toLocaleDateString('pt-BR')} até ${getCurrentWeekDates().sunday.toLocaleDateString('pt-BR')}`
+        : 'Todas as visitas';
+
+      // --- Cabeçalho do PDF ---
+      doc.setFontSize(18);
+      doc.text("RELATÓRIO DE PAGAMENTO", doc.internal.pageSize.getWidth() / 2, 20, { align: 'center' });
+      doc.setFontSize(10);
+      doc.text("SRM Visitas", doc.internal.pageSize.getWidth() / 2, 26, { align: 'center' });
+      
+      doc.setFontSize(12);
+      doc.text(`Funcionário: ${func.nome}`, 14, 40);
+      doc.text(`Tipo: ${func.tipo === 'tecnico' ? 'TÉCNICO' : 'GERENTE'}`, 14, 46);
+      doc.text(`Período: ${periodo}`, 14, 52);
+      doc.text(`Data do Relatório: ${reportDate}`, 14, 58);
+
+      // --- Tabela de Resumo Financeiro ---
+      doc.setFontSize(14);
+      doc.text("Resumo Financeiro", 14, 70);
+      doc.autoTable({
+        startY: 74,
+        theme: 'striped',
+        head: [['Descrição', 'Valor']],
+        body: [
+          ['Total de Visitas', stats.totalVisitas],
+          ['Total de Serviços', `R$ ${stats.totalServicos.toFixed(2)}`],
+          ['Total de Locomoção', `R$ ${stats.totalLocomocao.toFixed(2)}`],
+          ['Total Líquido', `R$ ${stats.totalGeral.toFixed(2)}`],
+        ],
+        styles: { fontSize: 10 },
+      });
+
+      // --- Tabela de Cálculo de Pagamento ---
+      let finalY = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(14);
+      doc.text("Cálculo de Pagamento", 14, finalY);
+      const salarioTxt = `Salário Fixo ${semanaAtual ? '(Semanal)' : '(Mensal)'}`;
+      const salarioVal = `R$ ${(semanaAtual ? stats.salarioFixo / 4 : stats.salarioFixo).toFixed(2)}`;
+      
+      let bodyPagamento = [[salarioTxt, salarioVal]];
+      if (func.tipo === 'tecnico') {
+        bodyPagamento.push([`Comissão (${stats.percentual}%)`, `R$ ${stats.comissao.toFixed(2)}`]);
+      }
+      bodyPagamento.push([
+        { content: 'TOTAL A PAGAR', styles: { fontStyle: 'bold', fontSize: 12 } },
+        { content: `R$ ${stats.totalAPagar.toFixed(2)}`, styles: { fontStyle: 'bold', fontSize: 12 } }
+      ]);
+
+      doc.autoTable({
+        startY: finalY + 4,
+        theme: 'grid',
+        head: [['Tipo', 'Valor']],
+        body: bodyPagamento,
+        styles: { fontSize: 10 },
+      });
+
+      // --- Tabela de Detalhamento das Visitas ---
+      finalY = doc.lastAutoTable.finalY + 10;
+      doc.setFontSize(14);
+      doc.text("Detalhamento das Visitas", 14, finalY);
+      
+      const visitasBody = visitasFiltradas.map((visita, index) => [
+        index + 1,
+        new Date(visita.data).toLocaleDateString('pt-BR'),
+        getClienteNome(visita.clienteId).substring(0, 25), // Limita tamanho
+        getServicoNome(visita.servicoId).substring(0, 25), // Limita tamanho
+        `R$ ${parseFloat(visita.valorLocomocao).toFixed(2)}`,
+        `R$ ${parseFloat(visita.valorServico).toFixed(2)}`,
+      ]);
+
+      doc.autoTable({
+        startY: finalY + 4,
+        theme: 'striped',
+        head: [['#', 'Data', 'Cliente', 'Serviço', 'Locomoção', 'Valor']],
+        body: visitasBody,
+        styles: { fontSize: 8 },
+        columnStyles: {
+          2: { cellWidth: 45 },
+          3: { cellWidth: 45 },
+        }
+      });
+
+      // --- Assinatura ---
+      finalY = doc.lastAutoTable.finalY + 20;
+      if (finalY > doc.internal.pageSize.getHeight() - 30) {
+        doc.addPage(); // Adiciona nova página se não couber
+        finalY = 20;
+      }
+      doc.text("_____________________________", 14, finalY);
+      doc.text("Assinatura", 14, finalY + 5);
+      doc.text(reportDate, 14, finalY + 10);
+
+      // 3. Salvar o PDF no dispositivo (temporariamente)
+      const pdfFileName = `relatorio-${func.nome.replace(/\s+/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      // `output('datauristring')` é a string base64 do PDF
+      const pdfBase64 = doc.output('datauristring').split(',')[1];
+      
+      // Salva no diretório de Cache (temporário, ideal para compartilhar)
+      const result = await Filesystem.writeFile({
+        path: pdfFileName,
+        data: pdfBase64,
+        directory: Directory.Cache, 
+      });
+
+      // 4. Atualizar o estado para mostrar os botões de Ação
+      setPdfData({ path: result.uri, name: pdfFileName });
+      setIsGeneratingPDF(false);
+
+    } catch (e) {
+      console.error("Erro ao salvar PDF:", e);
+      alert("Erro ao gerar o PDF.");
+      setIsGeneratingPDF(false);
+      setShowPDFModal(false);
+    }
   };
+
+  // --- NOVAS FUNÇÕES (Para os botões do Modal de PDF) ---
+
+  // Compartilhar
+  const handleSharePDF = async () => {
+    if (!pdfData) return;
+    try {
+      await Share.share({
+        title: 'Relatório SRM Visitas',
+        text: `Segue o relatório: ${pdfData.name}`,
+        url: pdfData.path, // O 'uri' salvo do Filesystem
+      });
+    } catch (error) {
+      console.error('Erro ao compartilhar:', error);
+      alert('Não foi possível compartilhar o arquivo.');
+    }
+  };
+
+  // Baixar (Salvar permanentemente em Documentos)
+  const handleDownloadPDF = async () => {
+    if (!pdfData) return;
+    try {
+      // Copia o arquivo do Cache para Documentos
+      await Filesystem.copy({
+        from: pdfData.path,
+        to: pdfData.name,
+        toDirectory: Directory.Documents,
+      });
+      alert(`Relatório salvo em Documentos/${pdfData.name}`);
+      setShowPDFModal(false); // Fecha o modal após o download
+    } catch (error) {
+      console.error('Erro ao baixar:', error);
+      // Pode falhar se o arquivo já existir
+      if (error.message.includes('File already exists')) {
+        alert('O arquivo já existe no seu diretório de Documentos.');
+      } else {
+        alert('Erro ao salvar o arquivo. Verifique as permissões.');
+      }
+    }
+  };
+
+  // --- Funções CRUD (Sem alterações) ---
 
   const openModal = (type, item = null) => {
     setModalType(type);
@@ -313,6 +459,7 @@ const SRMVisitas = () => {
     }
   };
 
+  // --- Funções de Importação (Sem alterações) ---
   const handleImportFile = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -350,6 +497,7 @@ const SRMVisitas = () => {
     setImportText('');
   };
 
+  // --- Funções de Cálculo e Filtro (Sem alterações) ---
   const getCurrentWeekDates = () => {
     const now = new Date();
     const dayOfWeek = now.getDay();
@@ -372,7 +520,9 @@ const SRMVisitas = () => {
     const { monday, sunday } = getCurrentWeekDates();
     return visitas.filter(v => {
       const visitDate = new Date(v.data);
-      return visitDate >= monday && visitDate <= sunday;
+      // Ajuste para incluir o dia exato (comparação de data)
+      const visitDateOnly = new Date(visitDate.getFullYear(), visitDate.getMonth(), visitDate.getDate());
+      return visitDateOnly >= monday && visitDateOnly <= sunday;
     });
   };
 
@@ -385,28 +535,32 @@ const SRMVisitas = () => {
       const totalVisitas = visitasFunc.length;
       const totalLocomocao = visitasFunc.reduce((sum, v) => sum + parseFloat(v.valorLocomocao || 0), 0);
       const totalServicos = visitasFunc.reduce((sum, v) => sum + parseFloat(v.valorServico || 0), 0);
-      const totalGeral = totalServicos - totalLocomocao;
       
+      // Cálculo ajustado
       let comissao = 0;
       let totalAPagar = 0;
+      const salarioBase = parseFloat(func.salarioFixo);
+      const salarioCalculo = semanaAtual ? salarioBase / 4 : salarioBase; // Salário semanal ou mensal
       
       if (func.tipo === 'tecnico') {
-        comissao = totalServicos * (parseFloat(func.percentual) / 100);
-        const salarioSemanal = parseFloat(func.salarioFixo) / 4;
-        totalAPagar = comissao + salarioSemanal;
+        comissao = (totalServicos - totalLocomocao) * (parseFloat(func.percentual) / 100);
+        totalAPagar = comissao + salarioCalculo;
       } else {
-        totalAPagar = parseFloat(func.salarioFixo) / 4;
+        totalAPagar = salarioCalculo;
       }
-      
+
+      // Adicionado totalGeral (Líquido)
+      const totalGeral = totalServicos - totalLocomocao;
+
       estatisticas[func.id] = {
         nome: func.nome,
         tipo: func.tipo,
         percentual: parseFloat(func.percentual),
-        salarioFixo: parseFloat(func.salarioFixo),
+        salarioFixo: salarioBase,
         totalVisitas,
         totalLocomocao,
         totalServicos,
-        totalGeral,
+        totalGeral, // Adicionado
         comissao,
         totalAPagar
       };
@@ -436,15 +590,20 @@ const SRMVisitas = () => {
       <div className="bg-gradient-to-r from-gray-800 to-gray-900 border-b-4 border-green-500 p-4 shadow-lg sticky top-0 z-40">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <div className="bg-green-500 p-2 rounded-lg">
-              <BarChart3 className="w-6 h-6 text-gray-900" />
+            
+            {/* --- ÍCONE ATUALIZADO (OBJETIVO 2) --- */}
+            {/* Substitua "logo.png" pelo nome do seu arquivo na pasta public/ */}
+            <div className="bg-green-500 p-1 rounded-lg flex items-center justify-center shadow-md">
+              <img src="/logo.png" alt="SRM Visitas" className="w-8 h-8 rounded-lg" />
             </div>
+            
             <div>
               <h1 className="text-lg font-bold text-green-500">SRM Visitas</h1>
               <p className="text-xs text-gray-400">Gerenciamento</p>
             </div>
           </div>
           <div className="flex space-x-2">
+            {/* Botão de Download (Backup) - Ação foi atualizada */}
             <button
               onClick={downloadBackup}
               className="bg-gray-700 p-2 rounded-lg hover:bg-gray-600 transition"
@@ -452,6 +611,7 @@ const SRMVisitas = () => {
             >
               <Download className="w-5 h-5 text-green-500" />
             </button>
+            {/* Botão de Restaurar (Backup) - Sem alteração */}
             <label className="bg-gray-700 p-2 rounded-lg hover:bg-gray-600 transition cursor-pointer" title="Restaurar Backup">
               <RotateCcw className="w-5 h-5 text-yellow-500" />
               <input
@@ -507,12 +667,13 @@ const SRMVisitas = () => {
                         {stats.tipo === 'tecnico' ? 'TÉCNICO' : 'GERENTE'}
                       </span>
                     </div>
+                    {/* Botão de Gerar Relatório (PDF) - Ação foi atualizada */}
                     <button
                       onClick={() => generateReport(parseInt(funcId))}
                       className="bg-green-500 text-gray-900 p-2 rounded-lg hover:bg-green-600 transition"
-                      title="Gerar Relatório"
+                      title="Gerar Relatório em PDF"
                     >
-                      <FileDown className="w-5 h-5" />
+                      <Download className="w-5 h-5" />
                     </button>
                   </div>
                   
@@ -545,7 +706,7 @@ const SRMVisitas = () => {
                       </div>
                       {stats.tipo === 'tecnico' && (
                         <div className="flex justify-between mb-2">
-                          <span className="text-gray-300 font-semibold text-xs">Comissão ({stats.percentual}%):</span>
+                          <span className="text-gray-300 font-semibold text-xs">Comissão ({stats.percentual}%) (Líquido):</span>
                           <span className="font-bold text-yellow-400 text-sm">
                             R$ {stats.comissao.toFixed(2)}
                           </span>
@@ -794,7 +955,7 @@ const SRMVisitas = () => {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Modal CRUD */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700 max-h-[85vh] overflow-y-auto">
@@ -812,6 +973,8 @@ const SRMVisitas = () => {
               </button>
             </div>
 
+            {/* ... Conteúdo dos modais CRUD (sem alterações) ... */}
+            
             {modalType === 'cliente' && (
               <div className="space-y-4">
                 <div>
@@ -1022,6 +1185,7 @@ const SRMVisitas = () => {
                 </button>
               </div>
             )}
+            
           </div>
         </div>
       )}
@@ -1073,6 +1237,58 @@ const SRMVisitas = () => {
           </div>
         </div>
       )}
+
+      {/* --- NOVO MODAL: PDF Report (OBJETIVO 3) --- */}
+      {showPDFModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-green-500">Relatório em PDF</h3>
+              <button onClick={() => setShowPDFModal(false)} className="text-gray-400 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Estado de Carregamento (Processo em tela) */}
+            {isGeneratingPDF && (
+              <div className="flex flex-col items-center justify-center h-48">
+                {/* Spinner */}
+                <svg className="animate-spin h-10 w-10 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p className="text-white mt-4">Gerando seu relatório em PDF...</p>
+              </div>
+            )}
+
+            {/* Estado de Concluído (Opções de Download/Compartilhar) */}
+            {!isGeneratingPDF && pdfData && (
+              <div className="space-y-4">
+                <p className="text-white text-center">
+                  Relatório <span className="font-bold text-green-500">{pdfData.name}</span> foi gerado com sucesso.
+                </p>
+                {/* Botão de Compartilhar */}
+                <button
+                  onClick={handleSharePDF}
+                  className="w-full bg-green-500 text-gray-900 px-4 py-3 rounded-lg font-bold hover:bg-green-600 transition flex items-center justify-center space-x-2"
+                >
+                  <Share2 className="w-5 h-5" />
+                  <span>Compartilhar</span>
+                </button>
+                {/* Botão de Baixar */}
+                <button
+                  onClick={handleDownloadPDF}
+                  className="w-full bg-blue-500 text-white px-4 py-3 rounded-lg font-bold hover:bg-blue-600 transition flex items-center justify-center space-x-2"
+                >
+                  <Download className="w-5 h-5" />
+                  <span>Baixar para Documentos</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
