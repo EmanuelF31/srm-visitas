@@ -147,7 +147,8 @@ export const generatePDF = async (funcionario, stats, visitas, periodo, semanaAt
     doc.setFontSize(8);
     doc.text(`Data: ${reportDate}`, 14, finalY + 15);
 
-    return doc;
+    doc.output('dataurlnewwindow');
+
   } catch (error) {
     console.error('Erro ao gerar PDF:', error);
     throw error;

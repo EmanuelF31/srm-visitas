@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.view.View;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
@@ -16,6 +17,13 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Adjust window insets to prevent overlap with status and navigation bars
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(true);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        }
         
         // Solicitar permissões ao iniciar
         requestStoragePermissions();
